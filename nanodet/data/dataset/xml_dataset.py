@@ -24,13 +24,33 @@ from .coco import CocoDataset
 
 
 def get_file_list(path, type=".xml"):
+    """
+    Get file list from single or multiple directories.
+    
+    Args:
+        path: str or list of str - single directory path or list of directory paths
+        type: file extension to filter (default: ".xml")
+    
+    Returns:
+        list of file names (relative paths from their respective directories)
+    """
     file_names = []
-    for maindir, subdir, file_name_list in os.walk(path):
-        for filename in file_name_list:
-            apath = os.path.join(maindir, filename)
-            ext = os.path.splitext(apath)[1]
-            if ext == type:
-                file_names.append(filename)
+    
+    # Support both single path (str) and multiple paths (list/sequence)
+    if isinstance(path, str):
+        paths = [path]
+    else:
+        paths = list(path)
+    
+    for p in paths:
+        for maindir, subdir, file_name_list in os.walk(p):
+            for filename in file_name_list:
+                apath = os.path.join(maindir, filename)
+                ext = os.path.splitext(apath)[1]
+                if ext == type:
+                    # Store relative path from the root directory
+                    rel_path = os.path.relpath(apath, p)
+                    file_names.append((p, rel_path))
     return file_names
 
 
@@ -61,13 +81,13 @@ class XMLDataset(CocoDataset):
     def xml_to_coco(self, ann_path):
         """
         convert xml annotations to coco_api
-        :param ann_path:
+        :param ann_path: str or list of str - single directory or multiple directories
         :return:
         """
         logging.info("loading annotations into memory...")
         tic = time.time()
-        ann_file_names = get_file_list(ann_path, type=".xml")
-        logging.info("Found {} annotation files.".format(len(ann_file_names)))
+        ann_file_tuples = get_file_list(ann_path, type=".xml")
+        logging.info("Found {} annotation files.".format(len(ann_file_tuples)))
         image_info = []
         categories = []
         annotations = []
@@ -76,8 +96,9 @@ class XMLDataset(CocoDataset):
                 {"supercategory": supercat, "id": idx + 1, "name": supercat}
             )
         ann_id = 1
-        for idx, xml_name in enumerate(ann_file_names):
-            tree = ET.parse(os.path.join(ann_path, xml_name))
+        for idx, (base_path, rel_path) in enumerate(ann_file_tuples):
+            full_path = os.path.join(base_path, rel_path)
+            tree = ET.parse(full_path)
             root = tree.getroot()
             file_name = root.find("filename").text
             width = int(root.find("size").find("width").text)
@@ -109,7 +130,7 @@ class XMLDataset(CocoDataset):
                 if w < 0 or h < 0:
                     logging.warning(
                         "WARNING! Find error data in file {}! Box w and "
-                        "h should > 0. Pass this box annotation.".format(xml_name)
+                        "h should > 0. Pass this box annotation.".format(rel_path)
                     )
                     continue
                 coco_box = [max(xmin, 0), max(ymin, 0), min(w, width), min(h, height)]

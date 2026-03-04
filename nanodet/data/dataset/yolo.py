@@ -56,22 +56,56 @@ class YoloDataset(CocoDataset):
         image_prefix: str,
         image_types: Sequence[str] = (".png", ".jpg", ".jpeg", ".bmp", ".tiff"),
     ) -> Optional[str]:
+        """Find image file with given prefix in single directory."""
         for image_type in image_types:
             path = f"{image_prefix}{image_type}"
             if os.path.exists(path):
                 return path
         return None
 
+    @staticmethod
+    def _find_image_multi(
+        image_prefix: str,
+        search_paths: Sequence[str],
+        image_types: Sequence[str] = (".png", ".jpg", ".jpeg", ".bmp", ".tiff"),
+    ) -> Optional[str]:
+        """Find image file with given prefix in multiple directories.
+        
+        Args:
+            image_prefix: base name without extension
+            search_paths: list of directories to search
+            image_types: possible image extensions
+        
+        Returns:
+            Full path to the first found image, or None
+        """
+        for search_path in search_paths:
+            for image_type in image_types:
+                path = os.path.join(search_path, f"{image_prefix}{image_type}")
+                if os.path.exists(path):
+                    return path
+        return None
+
     def yolo_to_coco(self, ann_path):
         """
         convert yolo annotations to coco_api
-        :param ann_path:
+        :param ann_path: str or list of str - single directory or multiple directories
         :return:
         """
         logging.info("loading annotations into memory...")
         tic = time.time()
-        ann_file_names = get_file_list(ann_path, type=".txt")
-        logging.info("Found {} annotation files.".format(len(ann_file_names)))
+        
+        # Support both single path (str) and multiple paths (list/sequence)
+        if isinstance(ann_path, str):
+            ann_paths = [ann_path]
+            single_mode = True
+        else:
+            ann_paths = list(ann_path)
+            single_mode = False
+        
+        ann_file_tuples = get_file_list(ann_path, type=".txt")
+        logging.info("Found {} annotation files from {} directory(ies).".format(
+            len(ann_file_tuples), len(ann_paths)))
         image_info = []
         categories = []
         annotations = []
@@ -81,9 +115,17 @@ class YoloDataset(CocoDataset):
             )
         ann_id = 1
 
-        for idx, txt_name in enumerate(ann_file_names):
-            ann_file = os.path.join(ann_path, txt_name)
-            image_file = self._find_image(os.path.splitext(ann_file)[0])
+        for idx, (base_path, rel_path) in enumerate(ann_file_tuples):
+            ann_file = os.path.join(base_path, rel_path)
+            # Get image prefix (filename without extension)
+            image_prefix = os.path.splitext(ann_file)[0]
+            
+            # Find image: single directory or search all directories
+            if single_mode:
+                image_file = self._find_image(image_prefix)
+            else:
+                image_file = self._find_image_multi(
+                    os.path.basename(image_prefix), ann_paths)
 
             if image_file is None:
                 logging.warning(f"Could not find image for {ann_file}")
@@ -116,14 +158,14 @@ class YoloDataset(CocoDataset):
 
                 if cat_id >= len(self.class_names):
                     logging.warning(
-                        f"Category {cat_id} is not defined in config ({txt_name})"
+                        f"Category {cat_id} is not defined in config ({rel_path})"
                     )
                     continue
 
                 if w < 0 or h < 0:
                     logging.warning(
                         "WARNING! Find error data in file {}! Box w and "
-                        "h should > 0. Pass this box annotation.".format(txt_name)
+                        "h should > 0. Pass this box annotation.".format(rel_path)
                     )
                     continue
 

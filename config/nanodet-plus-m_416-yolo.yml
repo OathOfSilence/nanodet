@@ -79,6 +79,10 @@ class_names:  &class_names ['person', 'bicycle', 'car', 'motorcycle', 'airplane'
 data:
   train:
     name: YoloDataset
+    # Support single directory (str) or multiple directories (list)
+    # Single directory: img_path: coco/train2017
+    # Multiple directories: img_path: [data/path1, data/path2, data/path3]
+    # Images and labels from all directories will be combined together
     img_path: coco/train2017
     ann_path: coco/train2017
     class_names: *class_names
