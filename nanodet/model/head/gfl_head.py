@@ -17,7 +17,7 @@ from nanodet.util import (
 
 from ...data.transform.warp import warp_boxes
 from ..loss.gfocal_loss import DistributionFocalLoss, QualityFocalLoss
-from ..loss.iou_loss import GIoULoss, bbox_overlaps
+from ..loss.iou_loss import GIoULoss, DIoULoss, CIoULoss, EIoULoss, bbox_overlaps
 from ..module.conv import ConvModule
 from ..module.init_weights import normal_init
 from ..module.nms import multiclass_nms
@@ -138,7 +138,20 @@ class GFLHead(nn.Module):
         self.loss_dfl = DistributionFocalLoss(
             loss_weight=self.loss_cfg.loss_dfl.loss_weight
         )
-        self.loss_bbox = GIoULoss(loss_weight=self.loss_cfg.loss_bbox.loss_weight)
+        # Support configurable bbox loss type
+        bbox_loss_type = getattr(self.loss_cfg.loss_bbox, 'name', 'GIoULoss')
+        bbox_loss_weight = self.loss_cfg.loss_bbox.loss_weight
+        if bbox_loss_type == 'GIoULoss':
+            self.loss_bbox = GIoULoss(loss_weight=bbox_loss_weight)
+        elif bbox_loss_type == 'DIoULoss':
+            self.loss_bbox = DIoULoss(loss_weight=bbox_loss_weight)
+        elif bbox_loss_type == 'CIoULoss':
+            self.loss_bbox = CIoULoss(loss_weight=bbox_loss_weight)
+        elif bbox_loss_type == 'EIoULoss':
+            self.loss_bbox = EIoULoss(loss_weight=bbox_loss_weight)
+        else:
+            raise ValueError(f"Unsupported bbox loss type: {bbox_loss_type}. "
+                           f"Supported types: GIoULoss, DIoULoss, CIoULoss, EIoULoss")
         self._init_layers()
         self.init_weights()
 
