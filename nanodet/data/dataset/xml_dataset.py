@@ -186,6 +186,20 @@ class XMLDataset(CocoDataset):
             "Load {} xml files and {} boxes".format(len(image_info), len(annotations))
         )
         logging.info("Done (t={:0.2f}s)".format(time.time() - tic))
+        
+        # Log image folder statistics
+        img_folder_stats = {}
+        for img in image_info:
+            img_base = img.get("img_base_path", "N/A")
+            img_folder_stats[img_base] = img_folder_stats.get(img_base, 0) + 1
+        
+        logging.info("=" * 60)
+        logging.info("Image Folder Statistics:")
+        for folder, count in sorted(img_folder_stats.items()):
+            logging.info(f"  {folder}: {count} images")
+        logging.info(f"  TOTAL: {len(image_info)} images")
+        logging.info("=" * 60)
+        
         return coco_dict
 
     def get_data_info(self, ann_path):
