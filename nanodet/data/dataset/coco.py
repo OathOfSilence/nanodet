@@ -122,7 +122,27 @@ class CocoDataset(BaseDataset):
         """
         img_info = self.get_per_img_info(idx)
         file_name = img_info["file_name"]
-        image_path = os.path.join(self.img_path, file_name)
+        
+        # Support multi-folder: use img_base_path if available, otherwise use self.img_path
+        if "img_base_path" in img_info:
+            # Multi-folder mode: use the specific base path for this image
+            image_path = os.path.join(img_info["img_base_path"], file_name)
+        else:
+            # Single folder mode or fallback
+            if isinstance(self.img_path, list):
+                # Try to find image in any of the folders
+                image_path = None
+                for img_base in self.img_path:
+                    candidate = os.path.join(img_base, file_name)
+                    if os.path.exists(candidate):
+                        image_path = candidate
+                        break
+            else:
+                image_path = os.path.join(self.img_path, file_name)
+        
+        if image_path is None:
+            raise FileNotFoundError(f"Cannot find image {file_name} in any of the img_path folders: {self.img_path}")
+        
         img = cv2.imread(image_path)
         if img is None:
             print("image {} read failed.".format(image_path))

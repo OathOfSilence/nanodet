@@ -71,7 +71,8 @@ class BaseDataset(Dataset, metaclass=ABCMeta):
         self.multi_scale = multi_scale
         self.mode = mode
 
-        self.data_info = self.get_data_info(ann_path)
+        # Pass both img_path and ann_path for multi-folder support
+        self.data_info = self.get_data_info((img_path, ann_path))
 
     def __len__(self):
         return len(self.data_info)

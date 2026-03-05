@@ -60,8 +60,12 @@ data:
   train:
     name: XMLDataset
     class_names: *class_names
+    # Single folder mode:
     img_path: TRAIN_IMAGE_FOLDER  #Please fill in train image path
     ann_path: TRAIN_XML_FOLDER  #Please fill in train xml path
+    # Multi-folder mode (img_path and ann_path must be one-to-one correspondence):
+    # img_path: ['/path/to/images1', '/path/to/images2']
+    # ann_path: ['/path/to/annotations1', '/path/to/annotations2']
     input_size: [320,320] #[w,h]
     keep_ratio: True
     pipeline:
@@ -79,8 +83,12 @@ data:
   val:
     name: XMLDataset
     class_names: *class_names
+    # Single folder mode:
     img_path: VAL_IMAGE_FOLDER #Please fill in val image path
     ann_path: VAL_XML_FOLDER #Please fill in val xml path
+    # Multi-folder mode (img_path and ann_path must be one-to-one correspondence):
+    # img_path: ['/path/to/val_images1', '/path/to/val_images2']
+    # ann_path: ['/path/to/val_annotations1', '/path/to/val_annotations2']
     input_size: [320,320] #[w,h]
     keep_ratio: True
     pipeline:

@@ -23,35 +23,61 @@ from pycocotools.coco import COCO
 from .coco import CocoDataset
 
 
-def get_file_list(path, type=".xml"):
+def get_file_list(img_paths, ann_paths, type=".xml"):
     """
-    Get file list from single or multiple directories.
+    Get file list from paired image and annotation directories.
+    img_paths and ann_paths must be one-to-one correspondence.
     
     Args:
-        path: str or list of str - single directory path or list of directory paths
+        img_paths: str or list of str - image directory path(s)
+        ann_paths: str or list of str - annotation directory path(s)
         type: file extension to filter (default: ".xml")
     
     Returns:
-        list of file names (relative paths from their respective directories)
+        list of tuples: (img_base_path, ann_base_path, xml_rel_path, img_rel_path)
+        - img_base_path: the image folder root
+        - ann_base_path: the annotation folder root (corresponding to img_base_path)
+        - xml_rel_path: relative path of XML from ann_base_path
+        - img_rel_path: relative path of image from img_base_path (derived from XML filename)
     """
-    file_names = []
+    file_tuples = []
     
-    # Support both single path (str) and multiple paths (list/sequence)
-    if isinstance(path, str):
-        paths = [path]
-    else:
-        paths = list(path)
+    # Normalize to lists
+    if isinstance(img_paths, str):
+        img_paths = [img_paths]
+    if isinstance(ann_paths, str):
+        ann_paths = [ann_paths]
     
-    for p in paths:
-        for maindir, subdir, file_name_list in os.walk(p):
+    if len(img_paths) != len(ann_paths):
+        raise ValueError(
+            f"img_paths and ann_paths must have the same length! "
+            f"Got img_paths: {len(img_paths)}, ann_paths: {len(ann_paths)}. "
+            "Please ensure they are one-to-one correspondence in YAML config."
+        )
+    
+    for img_base, ann_base in zip(img_paths, ann_paths):
+        for maindir, subdir, file_name_list in os.walk(ann_base):
             for filename in file_name_list:
                 apath = os.path.join(maindir, filename)
                 ext = os.path.splitext(apath)[1]
                 if ext == type:
-                    # Store relative path from the root directory
-                    rel_path = os.path.relpath(apath, p)
-                    file_names.append((p, rel_path))
-    return file_names
+                    # XML relative path from its annotation root
+                    xml_rel_path = os.path.relpath(apath, ann_base)
+                    # Parse XML to get image filename
+                    try:
+                        tree = ET.parse(apath)
+                        root = tree.getroot()
+                        img_filename = root.find("filename").text
+                        # Image relative path (same relative structure as XML)
+                        img_name_no_ext = os.path.splitext(xml_rel_path)[0]
+                        img_ext = os.path.splitext(img_filename)[1]
+                        img_rel_path = img_name_no_ext + img_ext
+                    except Exception as e:
+                        logging.warning(f"Failed to parse {apath}: {e}")
+                        continue
+                    file_tuples.append((img_base, ann_base, xml_rel_path, img_rel_path))
+    
+    return file_tuples
 
 
 class CocoXML(COCO):
@@ -81,12 +107,15 @@ class XMLDataset(CocoDataset):
     def xml_to_coco(self, ann_path):
         """
         convert xml annotations to coco_api
-        :param ann_path: str or list of str - single directory or multiple directories
+        :param ann_path: tuple of (img_paths, ann_paths) - paired image and annotation paths
         :return:
         """
         logging.info("loading annotations into memory...")
         tic = time.time()
-        ann_file_tuples = get_file_list(ann_path, type=".xml")
+        
+        # ann_path is now (img_paths, ann_paths) tuple from BaseDataset
+        img_paths, ann_paths = ann_path
+        ann_file_tuples = get_file_list(img_paths, ann_paths, type=".xml")
         logging.info("Found {} annotation files.".format(len(ann_file_tuples)))
         image_info = []
         categories = []
@@ -96,18 +125,21 @@ class XMLDataset(CocoDataset):
                 {"supercategory": supercat, "id": idx + 1, "name": supercat}
             )
         ann_id = 1
-        for idx, (base_path, rel_path) in enumerate(ann_file_tuples):
-            full_path = os.path.join(base_path, rel_path)
+        for idx, (img_base, ann_base, xml_rel_path, img_rel_path) in enumerate(ann_file_tuples):
+            full_path = os.path.join(ann_base, xml_rel_path)
             tree = ET.parse(full_path)
             root = tree.getroot()
             file_name = root.find("filename").text
             width = int(root.find("size").find("width").text)
             height = int(root.find("size").find("height").text)
+            # Store the relative path from corresponding image folder
+            # Also store the img_base_path for correct image loading
             info = {
-                "file_name": file_name,
+                "file_name": img_rel_path,
                 "height": height,
                 "width": width,
                 "id": idx + 1,
+                "img_base_path": img_base,  # Custom field for multi-folder support
             }
             image_info.append(info)
             for _object in root.findall("object"):
@@ -130,7 +162,7 @@ class XMLDataset(CocoDataset):
                 if w < 0 or h < 0:
                     logging.warning(
                         "WARNING! Find error data in file {}! Box w and "
-                        "h should > 0. Pass this box annotation.".format(rel_path)
+                        "h should > 0. Pass this box annotation.".format(xml_rel_path)
                     )
                     continue
                 coco_box = [max(xmin, 0), max(ymin, 0), min(w, width), min(h, height)]
@@ -159,7 +191,7 @@ class XMLDataset(CocoDataset):
     def get_data_info(self, ann_path):
         """
         Load basic information of dataset such as image path, label and so on.
-        :param ann_path: coco json file path
+        :param ann_path: tuple of (img_paths, ann_paths) - passed from BaseDataset
         :return: image info:
         [{'file_name': '000000000139.jpg',
           'height': 426,
