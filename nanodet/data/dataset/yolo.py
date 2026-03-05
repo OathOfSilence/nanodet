@@ -16,14 +16,68 @@ import logging
 import os
 import time
 from collections import defaultdict
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple, Union
 
 import numpy as np
 from imagesize import imagesize
 from pycocotools.coco import COCO
 
 from .coco import CocoDataset
-from .xml_dataset import get_file_list
+
+
+def get_yolo_file_list(img_paths, ann_paths, type=".txt"):
+    """
+    Get file list from paired image and annotation directories.
+    img_paths and ann_paths must be one-to-one correspondence.
+    
+    Args:
+        img_paths: str or list of str - image directory path(s)
+        ann_paths: str or list of str - annotation directory path(s)
+        type: file extension to filter (default: ".txt")
+    
+    Returns:
+        list of tuples: (img_base_path, ann_base_path, txt_rel_path, img_rel_path)
+        - img_base_path: the image folder root
+        - ann_base_path: the annotation folder root (corresponding to img_base_path)
+        - txt_rel_path: relative path of txt from ann_base_path
+        - img_rel_path: relative path of image from img_base_path (derived from txt filename)
+    """
+    file_tuples = []
+    
+    # Normalize to lists
+    if isinstance(img_paths, str):
+        img_paths = [img_paths]
+    if isinstance(ann_paths, str):
+        ann_paths = [ann_paths]
+    
+    if len(img_paths) != len(ann_paths):
+        raise ValueError(
+            f"img_paths and ann_paths must have the same length! "
+            f"Got img_paths: {len(img_paths)}, ann_paths: {len(ann_paths)}. "
+            "Please ensure they are one-to-one correspondence in YAML config."
+        )
+    
+    for img_base, ann_base in zip(img_paths, ann_paths):
+        for maindir, subdir, file_name_list in os.walk(ann_base):
+            for filename in file_name_list:
+                apath = os.path.join(maindir, filename)
+                ext = os.path.splitext(apath)[1]
+                if ext == type:
+                    # TXT relative path from its annotation root
+                    txt_rel_path = os.path.relpath(apath, ann_base)
+                    # Image relative path (same relative structure as TXT)
+                    img_name_no_ext = os.path.splitext(txt_rel_path)[0]
+                    # Try common image extensions
+                    for img_ext in [".jpg", ".png", ".jpeg", ".bmp", ".tiff"]:
+                        candidate = os.path.join(img_base, img_name_no_ext + img_ext)
+                        if os.path.exists(candidate):
+                            img_rel_path = img_name_no_ext + img_ext
+                            file_tuples.append((img_base, ann_base, txt_rel_path, img_rel_path))
+                            break
+                    else:
+                        logging.warning(f"Could not find image for {apath}")
+    
+    return file_tuples
 
 
 class CocoYolo(COCO):
@@ -51,61 +105,19 @@ class YoloDataset(CocoDataset):
         self.class_names = class_names
         super(YoloDataset, self).__init__(**kwargs)
 
-    @staticmethod
-    def _find_image(
-        image_prefix: str,
-        image_types: Sequence[str] = (".png", ".jpg", ".jpeg", ".bmp", ".tiff"),
-    ) -> Optional[str]:
-        """Find image file with given prefix in single directory."""
-        for image_type in image_types:
-            path = f"{image_prefix}{image_type}"
-            if os.path.exists(path):
-                return path
-        return None
-
-    @staticmethod
-    def _find_image_multi(
-        image_prefix: str,
-        search_paths: Sequence[str],
-        image_types: Sequence[str] = (".png", ".jpg", ".jpeg", ".bmp", ".tiff"),
-    ) -> Optional[str]:
-        """Find image file with given prefix in multiple directories.
-        
-        Args:
-            image_prefix: base name without extension
-            search_paths: list of directories to search
-            image_types: possible image extensions
-        
-        Returns:
-            Full path to the first found image, or None
-        """
-        for search_path in search_paths:
-            for image_type in image_types:
-                path = os.path.join(search_path, f"{image_prefix}{image_type}")
-                if os.path.exists(path):
-                    return path
-        return None
-
     def yolo_to_coco(self, ann_path):
         """
         convert yolo annotations to coco_api
-        :param ann_path: str or list of str - single directory or multiple directories
+        :param ann_path: tuple of (img_paths, ann_paths) - paired image and annotation paths
         :return:
         """
         logging.info("loading annotations into memory...")
         tic = time.time()
         
-        # Support both single path (str) and multiple paths (list/sequence)
-        if isinstance(ann_path, str):
-            ann_paths = [ann_path]
-            single_mode = True
-        else:
-            ann_paths = list(ann_path)
-            single_mode = False
-        
-        ann_file_tuples = get_file_list(ann_path, type=".txt")
-        logging.info("Found {} annotation files from {} directory(ies).".format(
-            len(ann_file_tuples), len(ann_paths)))
+        # ann_path is now (img_paths, ann_paths) tuple from BaseDataset
+        img_paths, ann_paths = ann_path
+        ann_file_tuples = get_yolo_file_list(img_paths, ann_paths, type=".txt")
+        logging.info("Found {} annotation files.".format(len(ann_file_tuples)))
         image_info = []
         categories = []
         annotations = []
@@ -115,33 +127,23 @@ class YoloDataset(CocoDataset):
             )
         ann_id = 1
 
-        for idx, (base_path, rel_path) in enumerate(ann_file_tuples):
-            ann_file = os.path.join(base_path, rel_path)
-            # Get image prefix (filename without extension)
-            image_prefix = os.path.splitext(ann_file)[0]
-            
-            # Find image: single directory or search all directories
-            if single_mode:
-                image_file = self._find_image(image_prefix)
-            else:
-                image_file = self._find_image_multi(
-                    os.path.basename(image_prefix), ann_paths)
-
-            if image_file is None:
-                logging.warning(f"Could not find image for {ann_file}")
-                continue
+        for idx, (img_base, ann_base, txt_rel_path, img_rel_path) in enumerate(ann_file_tuples):
+            ann_file = os.path.join(ann_base, txt_rel_path)
+            image_file = os.path.join(img_base, img_rel_path)
 
             with open(ann_file, "r") as f:
                 lines = f.readlines()
 
             width, height = imagesize.get(image_file)
 
-            file_name = os.path.basename(image_file)
+            # Store the relative path from corresponding image folder
+            # Also store the img_base_path for correct image loading
             info = {
-                "file_name": file_name,
+                "file_name": img_rel_path,
                 "height": height,
                 "width": width,
                 "id": idx + 1,
+                "img_base_path": img_base,  # Custom field for multi-folder support
             }
             image_info.append(info)
             for line in lines:
@@ -158,14 +160,14 @@ class YoloDataset(CocoDataset):
 
                 if cat_id >= len(self.class_names):
                     logging.warning(
-                        f"Category {cat_id} is not defined in config ({rel_path})"
+                        f"Category {cat_id} is not defined in config ({txt_rel_path})"
                     )
                     continue
 
                 if w < 0 or h < 0:
                     logging.warning(
                         "WARNING! Find error data in file {}! Box w and "
-                        "h should > 0. Pass this box annotation.".format(rel_path)
+                        "h should > 0. Pass this box annotation.".format(txt_rel_path)
                     )
                     continue
 
@@ -195,7 +197,7 @@ class YoloDataset(CocoDataset):
     def get_data_info(self, ann_path):
         """
         Load basic information of dataset such as image path, label and so on.
-        :param ann_path: coco json file path
+        :param ann_path: tuple of (img_paths, ann_paths) - passed from BaseDataset
         :return: image info:
         [{'file_name': '000000000139.jpg',
           'height': 426,

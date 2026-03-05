@@ -1,4 +1,4 @@
-# XMLDataset 多文件夹支持说明
+# 多文件夹支持说明
 
 ## 修改内容
 
@@ -14,14 +14,23 @@
 
 ### 2. 修改的文件
 
+#### 通用修改
 - `nanodet/data/dataset/base.py`: 传递 `(img_path, ann_path)` 元组给 `get_data_info`
+- `nanodet/data/dataset/coco.py`: 
+  - `get_train_data()` 支持从 `img_base_path` 加载图片
+  - 向后兼容单文件夹模式
+
+#### XMLDataset (VOC 格式)
 - `nanodet/data/dataset/xml_dataset.py`: 
   - `get_file_list()` 改为接收配对的文件夹列表
   - 返回 `(img_base, ann_base, xml_rel_path, img_rel_path)` 四元组
   - 在 COCO 格式中保存 `img_base_path` 字段用于图片加载
-- `nanodet/data/dataset/coco.py`: 
-  - `get_train_data()` 支持从 `img_base_path` 加载图片
-  - 向后兼容单文件夹模式
+
+#### YoloDataset (YOLO 格式)
+- `nanodet/data/dataset/yolo.py`: 
+  - 新增 `get_yolo_file_list()` 函数
+  - 返回 `(img_base, ann_base, txt_rel_path, img_rel_path)` 四元组
+  - 在 COCO 格式中保存 `img_base_path` 字段用于图片加载
 
 ### 3. 性能优势
 
@@ -34,7 +43,7 @@
 ```yaml
 data:
   train:
-    name: XMLDataset
+    name: XMLDataset  # 或 YoloDataset
     class_names: ['cat', 'dog']
     img_path: /data/train/images
     ann_path: /data/train/annotations
@@ -45,7 +54,7 @@ data:
 ```yaml
 data:
   train:
-    name: XMLDataset
+    name: XMLDataset  # 或 YoloDataset
     class_names: ['cat', 'dog']
     img_path: ['/data/train/images1', '/data/train/images2']
     ann_path: ['/data/train/annotations1', '/data/train/annotations2']
@@ -57,7 +66,8 @@ data:
 1. **列表长度必须相同**: `img_path` 和 `ann_path` 的列表长度必须一致
 2. **顺序对应**: 第 N 个图片文件夹对应第 N 个标注文件夹
 3. **XML 文件内容**: XML 中的 `<filename>` 字段仍然需要正确设置
-4. **相对路径保持**: 如果 XML 在子文件夹中，图片相对路径会保持相同结构
+4. **YOLO 格式**: 图片和 TXT 同名（如 `image1.jpg` 和 `image1.txt`）
+5. **相对路径保持**: 如果标注文件在子文件夹中，图片相对路径会保持相同结构
 
 ## 错误处理
 
